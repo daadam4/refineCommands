@@ -1,15 +1,35 @@
 import csv
 import datetime
 from netmiko import ConnectHandler
+from multiprocessing import Pool
+import getpass
 
-# Function to establish SSH connection and run show commands
-def run_show_commands(hostname, ip, commands):
+print("""
+
+  _   _      _                      _      ____                  
+ | \ | | ___| |___      _____  _ __| | __ / ___|  ___ __ _ _ __  
+ |  \| |/ _ \ __\ \ /\ / / _ \| '__| |/ / \___ \ / __/ _` | '_ \ 
+ | |\  |  __/ |_ \ V  V / (_) | |  |   <   ___) | (_| (_| | | | |
+ |_| \_|\___|\__| \_/\_/ \___/|_|  |_|\_\ |____/ \___\__,_|_| |_|
+                                                                 
+                 
+"""
+)
+
+username = input("Username:")
+password = getpass.getpass()
+
+# Function to establish SSH connection and run show commands for a single host
+def process_host(host):
+    hostname = host['hostname']
+    ip = host['ip']
+    commands = host['commands']
+
     device = {
         'device_type': 'cisco_ios',
         'ip': ip,
-        'username': 'your_username',
-        'password': 'your_password',
-        'secret': 'your_enable_password',
+        'username': username,
+        'password': password,
     }
 
     try:
@@ -27,10 +47,11 @@ def run_show_commands(hostname, ip, commands):
         # Close SSH connection
         net_connect.disconnect()
 
-        return output
+        # Return the hostname and output
+        return {'hostname': hostname, 'output': output}
 
     except Exception as e:
-        return f"Error connecting to {hostname}: {str(e)}"
+        return {'hostname': hostname, 'output': f"Error connecting to {hostname}: {str(e)}"}
 
 # Function to write output to a file
 def write_output_file(hostname, output):
@@ -45,31 +66,34 @@ def write_output_file(hostname, output):
 # Main function
 def main():
     # CSV file paths
-    input_csv_file = 'input.csv'
-    commands_csv_file = 'commands.csv'
+    input_csv_file = input("Enter path to host CSV file (Press Enter to default to ./ip_addresses.csv):") or "ip_addresses.csv"
+    commands_csv_file = input("Enter path to commands CSV file (Press Enter to default to ./commands.csv):") or "commands.csv"
 
     # Read hostnames and IP addresses from input CSV
     hosts = []
     with open(input_csv_file, 'r') as file:
-        reader = csv.reader(file)
-        next(reader)  # Skip header row
+        reader = csv.DictReader(file)
         for row in reader:
-            hosts.append({'hostname': row[0], 'ip': row[1]})
+            hosts.append({'hostname': row['Hostname'], 'ip': row['IP'], 'commands': []})
 
     # Read commands from commands CSV
-    commands = []
     with open(commands_csv_file, 'r') as file:
-        reader = csv.reader(file)
-        next(reader)  # Skip header row
+        reader = csv.DictReader(file)
         for row in reader:
-            commands.append(row[0])
+            for host in hosts:
+                host['commands'].append(row['Command'])
 
-    # Connect to switches and run show commands
-    for host in hosts:
-        output = run_show_commands(host['hostname'], host['ip'], commands)
+    # Create a process pool
+    pool = Pool()
 
-        # Write output to file
-        write_output_file(host['hostname'], output)
+    # Process hosts in parallel
+    results = pool.map(process_host, hosts)
+
+    # Write output files
+    for result in results:
+        hostname = result['hostname']
+        output = result['output']
+        write_output_file(hostname, output)
 
 if __name__ == '__main__':
     main()
